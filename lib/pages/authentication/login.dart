@@ -94,15 +94,24 @@ class _LoginState extends State<Login> {
     final db = DatabaseHelper();
 
     await db.connect();
+    // In your _login method:
     final user = await db.authenticateUser(username, password);
 
     if (user == null) {
       _showMessage('Invalid username or password.');
     } else {
+      final userId = user['user_id'];
+      final email = user['email'];
+
+      if (userId == null) {
+        _showMessage('Invalid user data received');
+        return;
+      }
+
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      prefs.setBool('isLoggedIn', true);
-      prefs.setString('userId', user['id']);
-      prefs.setString('username', username);
+      await prefs.setString('userId', userId);
+      await prefs.setString('username', username);
+      if (email != null) await prefs.setString('email', email);
 
       Navigator.pushReplacement(
         context,

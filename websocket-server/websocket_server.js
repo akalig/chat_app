@@ -1,24 +1,35 @@
-// websocket_server.js
 const WebSocket = require('ws');
 const { Pool } = require('pg');
 
+// Configure PostgreSQL connection
 const pool = new Pool({
   user: 'postgres',
-  host: '192.168.1.160',
+  host: 'localhost', // Changed from 10.0.2.2 to localhost
   database: 'chat_application',
   password: 'admin',
   port: 5432,
+  // Add connection timeout
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30000,
 });
 
 const wss = new WebSocket.Server({ port: 8080 });
-
-// Store active connections by user ID
 const activeConnections = new Map();
 
-wss.on('connection', async (ws) => {
+// Database connection check
+async function checkDatabaseConnection() {
+  try {
+    await pool.query('SELECT NOW()');
+    console.log('Database connection successful');
+  } catch (err) {
+    console.error('Database connection error:', err);
+    process.exit(1);
+  }
+}
+
+wss.on('connection', (ws) => {
   console.log('New client connected');
 
-  // First message should be authentication with user ID
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message);
@@ -28,50 +39,56 @@ wss.on('connection', async (ws) => {
         activeConnections.set(data.userId, ws);
         console.log(`User ${data.userId} authenticated`);
 
-        // Send chat history if requested
         if (data.chatId) {
-          const history = await getChatHistory(data.chatId);
-          ws.send(JSON.stringify({
-            type: 'history',
-            messages: history
-          }));
+          try {
+            const history = await getChatHistory(data.chatId);
+            ws.send(JSON.stringify({
+              type: 'history',
+              messages: history
+            }));
+          } catch (err) {
+            console.error('Error sending history:', err);
+          }
         }
         return;
       }
 
-      // Handle regular messages
+      // Handle messages
       if (data.type === 'message' && data.sender_id && data.content && data.chat_id) {
-        // Save to database
-        await saveMessage(
-          data.chat_id,
-          data.sender_id,
-          data.content
-        );
+        try {
+          const messageId = await saveMessage(data.chat_id, data.sender_id, data.content);
+          const sender = await getSenderDetails(data.sender_id);
+          const participants = await getChatParticipants(data.chat_id);
 
-        // Broadcast to recipient if online
-        const recipientWs = activeConnections.get(data.recipient_id);
-        if (recipientWs) {
-          recipientWs.send(JSON.stringify({
-            type: 'message',
-            ...data
+          participants.forEach(participantId => {
+            const connection = activeConnections.get(participantId);
+            if (connection && connection.readyState === WebSocket.OPEN) {
+              connection.send(JSON.stringify({
+                type: 'message',
+                id: messageId,
+                content: data.content,
+                sender_id: data.sender_id,
+                firstname: sender.firstname,
+                lastname: sender.lastname,
+                sent_at: new Date().toISOString()
+              }));
+            }
+          });
+        } catch (err) {
+          console.error('Error handling message:', err);
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to send message'
           }));
         }
-
-        // Also send back to sender for UI update
-        ws.send(JSON.stringify({
-          type: 'message',
-          ...data,
-          status: 'delivered'
-        }));
       }
     } catch (error) {
-      console.error('Error handling message:', error);
+      console.error('Message handling error:', error);
     }
   });
 
   ws.on('close', () => {
-    // Remove from active connections
-    for (const [userId, connection] of activeConnections.entries) {
+    for (const [userId, connection] of activeConnections.entries()) {
       if (connection === ws) {
         activeConnections.delete(userId);
         console.log(`User ${userId} disconnected`);
@@ -79,41 +96,73 @@ wss.on('connection', async (ws) => {
       }
     }
   });
+
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+  });
 });
 
+// Database functions
 async function saveMessage(chatId, senderId, content) {
-  const query = `
-    INSERT INTO messages (chat_id, sender_id, content, sent_at, status)
-    VALUES ($1, $2, $3, NOW(), 'delivered')
-    RETURNING id`;
-
-  const values = [chatId, senderId, content];
-
+  const client = await pool.connect();
   try {
-    const res = await pool.query(query, values);
+    const res = await client.query(
+      `INSERT INTO messages (chat_id, sender_id, content, sent_at, status)
+       VALUES ($1, $2, $3, NOW(), 'delivered')
+       RETURNING id`,
+      [chatId, senderId, content]
+    );
     return res.rows[0].id;
-  } catch (err) {
-    console.error('Error saving message:', err);
-    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function getSenderDetails(userId) {
+  const client = await pool.connect();
+  try {
+    const res = await client.query(
+      'SELECT firstname, lastname FROM users WHERE id = $1',
+      [userId]
+    );
+    return res.rows[0];
+  } finally {
+    client.release();
   }
 }
 
 async function getChatHistory(chatId) {
-  const query = `
-    SELECT m.id, m.content, m.sent_at, m.status,
-           u.firstname, u.lastname
-    FROM messages m
-    JOIN users u ON m.sender_id = u.id
-    WHERE m.chat_id = $1
-    ORDER BY m.sent_at ASC`;
-
+  const client = await pool.connect();
   try {
-    const res = await pool.query(query, [chatId]);
+    const res = await client.query(
+      `SELECT m.id, m.content, m.sent_at, m.status,
+              u.firstname, u.lastname, u.id as sender_id
+       FROM messages m
+       JOIN users u ON m.sender_id = u.id
+       WHERE m.chat_id = $1
+       ORDER BY m.sent_at ASC`,
+      [chatId]
+    );
     return res.rows;
-  } catch (err) {
-    console.error('Error fetching chat history:', err);
-    return [];
+  } finally {
+    client.release();
   }
 }
 
-console.log('WebSocket server running on ws://localhost:8080');
+async function getChatParticipants(chatId) {
+  const client = await pool.connect();
+  try {
+    const res = await client.query(
+      'SELECT user_id FROM chat_users WHERE chat_id = $1',
+      [chatId]
+    );
+    return res.rows.map(row => row.user_id);
+  } finally {
+    client.release();
+  }
+}
+
+// Start server
+checkDatabaseConnection().then(() => {
+  console.log('WebSocket server running on ws://localhost:8080');
+});
