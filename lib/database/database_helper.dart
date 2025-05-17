@@ -15,7 +15,7 @@ class DatabaseHelper {
 
       // Create a new connection
       _connection = PostgreSQLConnection(
-        '10.0.2.2',
+        '192.168.1.160',
         5432,
         'chat_application',
         username: 'postgres',

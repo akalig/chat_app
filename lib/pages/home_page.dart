@@ -19,7 +19,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
+class _HomePageState extends State<HomePage>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
@@ -34,10 +35,16 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   @override
   void initState() {
     super.initState();
-    _initializeChat();
+    try {
+      _initializeChat();
+    } catch (e, stack) {
+      print('Error during initState: $e');
+      print(stack);
+    }
   }
 
   Future<void> _initializeChat() async {
+    print('Initializing chat...');
     await _loadUserData();
     await _loadInitialMessages();
     _connectToWebSocket();
@@ -61,7 +68,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
   }
 
-  // In the _formatMessage method:
   Map<String, dynamic> _formatMessage(Map<String, dynamic> msg) {
     return {
       'id': msg['id'],
@@ -75,7 +81,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     };
   }
 
-// In the _handleIncomingMessage method:
   void _handleIncomingMessage(Map<String, dynamic> message) {
     if (!mounted) return;
 
@@ -96,20 +101,20 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _currentUserId = prefs.getString('userId');
-      _username = prefs.getString('username');
-    });
+    _currentUserId = prefs.getString('userId');
+    _username = prefs.getString('username');
+    print('Loaded user data: userId=$_currentUserId, username=$_username');
   }
 
-  // Modify _connectToWebSocket():
   void _connectToWebSocket() {
     try {
+      print('Connecting to WebSocket at ws://192.168.1.160:8080');
       _channel = WebSocketChannel.connect(
-        Uri.parse('ws://10.0.2.2:8080/ws'),
+        Uri.parse('ws://192.168.1.160:8080'),
       );
 
-      // Send authentication first
+      print('WebSocket connection established');
+
       _channel.sink.add(json.encode({
         'type': 'auth',
         'userId': _currentUserId,
@@ -118,6 +123,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
       _channel.stream.listen(
             (message) {
+          print('Received WebSocket message: $message');
           final decoded = json.decode(message);
           if (decoded['type'] == 'message') {
             _handleIncomingMessage(decoded);
@@ -125,29 +131,36 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
             _handleHistory(decoded['messages']);
           }
         },
-        onError: (error) => _handleWebSocketError(error),
-        onDone: () => _handleWebSocketDisconnect(),
+        onError: (error) {
+          print('WebSocket stream error: $error');
+          _handleWebSocketError(error);
+        },
+        onDone: () {
+          print('WebSocket stream done');
+          _handleWebSocketDisconnect();
+        },
       );
     } catch (e) {
+      print('WebSocket connection error: $e');
       _showConnectionError();
       _reconnectWebSocket();
     }
   }
 
-// Add history handler:
   void _handleHistory(List<dynamic> messages) {
     if (!mounted) return;
 
     setState(() {
       _messages.clear();
-      _messages.addAll(messages.map((msg) => _formatMessage({
-        'id': msg['id'],
-        'content': msg['content'],
-        'sender_id': msg['sender_id'],
-        'firstname': msg['firstname'],
-        'lastname': msg['lastname'],
-        'sent_at': msg['sent_at']
-      })));
+      _messages.addAll(messages.map((msg) =>
+          _formatMessage({
+            'id': msg['id'],
+            'content': msg['content'],
+            'sender_id': msg['sender_id'],
+            'firstname': msg['firstname'],
+            'lastname': msg['lastname'],
+            'sent_at': msg['sent_at']
+          })));
     });
     _scrollToBottom();
   }
@@ -155,7 +168,10 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   void _sendMessage() async {
     if (_messageController.text.isEmpty) return;
 
-    final tempMessageId = DateTime.now().millisecondsSinceEpoch.toString();
+    final tempMessageId = DateTime
+        .now()
+        .millisecondsSinceEpoch
+        .toString();
     final messageContent = _messageController.text;
 
     // Add message optimistically
@@ -192,7 +208,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
         final index = _messages.indexWhere((m) => m['id'] == tempMessageId);
         if (index != -1) _messages[index]['id'] = messageId;
       });
-
     } catch (e) {
       // Remove optimistic message on error
       setState(() {
@@ -296,7 +311,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                 final isMe = message['is_me'] ?? false;
 
                 return Align(
-                  alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: isMe ? Alignment.centerRight : Alignment
+                      .centerLeft,
                   child: Container(
                     margin: const EdgeInsets.symmetric(
                       vertical: 4,
@@ -321,7 +337,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                         Text(message['content']),
                         const SizedBox(height: 4),
                         Text(
-                          _formatTime(message['timestamp'] ?? message['sent_at']),
+                          _formatTime(message['timestamp'] ??
+                              message['sent_at']),
                           style: const TextStyle(
                             fontSize: 10,
                             color: Colors.black54,

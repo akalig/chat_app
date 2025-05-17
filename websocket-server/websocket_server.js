@@ -1,12 +1,11 @@
 const WebSocket = require('ws');
 const { Pool } = require('pg');
 
-// Configure PostgreSQL connection
 const pool = new Pool({
   user: 'postgres',
-  host: 'localhost', // Changed from 10.0.2.2 to localhost
+  host: 'localhost',
   database: 'chat_application',
-  password: 'admin',
+  password: 'postgres',
   port: 5432,
   // Add connection timeout
   connectionTimeoutMillis: 5000,
@@ -16,7 +15,6 @@ const pool = new Pool({
 const wss = new WebSocket.Server({ port: 8080 });
 const activeConnections = new Map();
 
-// Database connection check
 async function checkDatabaseConnection() {
   try {
     await pool.query('SELECT NOW()');
@@ -102,7 +100,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Database functions
 async function saveMessage(chatId, senderId, content) {
   const client = await pool.connect();
   try {
@@ -162,7 +159,6 @@ async function getChatParticipants(chatId) {
   }
 }
 
-// Start server
 checkDatabaseConnection().then(() => {
   console.log('WebSocket server running on ws://localhost:8080');
 });
