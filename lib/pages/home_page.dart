@@ -69,14 +69,24 @@ class _HomePageState extends State<HomePage>
   }
 
   Map<String, dynamic> _formatMessage(Map<String, dynamic> msg) {
+    DateTime sentAt;
+
+    // Handle both String and DateTime inputs
+    if (msg['sent_at'] is String) {
+      sentAt = DateTime.parse(msg['sent_at']);
+    } else if (msg['sent_at'] is DateTime) {
+      sentAt = msg['sent_at'] as DateTime;
+    } else {
+      sentAt = DateTime.now(); // fallback
+    }
+
     return {
       'id': msg['id'],
       'content': msg['content'],
       'sender_id': msg['sender_id'],
       'firstname': msg['firstname'],
       'lastname': msg['lastname'],
-      // Convert DateTime to ISO String
-      'sent_at': (msg['sent_at'] as DateTime).toIso8601String(),
+      'sent_at': sentAt.toIso8601String(), // Ensure we always store as ISO string
       'is_me': msg['sender_id'] == _currentUserId,
     };
   }
@@ -108,9 +118,14 @@ class _HomePageState extends State<HomePage>
 
   void _connectToWebSocket() {
     try {
-      print('Connecting to WebSocket at ws://192.168.1.160:8080');
+      // print('Connecting to WebSocket at ws://192.168.1.34:8080');
+      // _channel = WebSocketChannel.connect(
+      //   Uri.parse('ws://192.168.1.34:8080'),
+      // );
+
+      print('Connecting to WebSocket at ws://10.0.2.2:8080');
       _channel = WebSocketChannel.connect(
-        Uri.parse('ws://192.168.1.160:8080'),
+        Uri.parse('ws://10.0.2.2:8080'),
       );
 
       print('WebSocket connection established');
@@ -175,25 +190,25 @@ class _HomePageState extends State<HomePage>
     final messageContent = _messageController.text;
 
     // Add message optimistically
-    setState(() {
-      _messages.add({
-        'id': tempMessageId,
-        'content': messageContent,
-        'sender_id': _currentUserId,
-        'is_me': true,
-        'sent_at': DateTime.now().toIso8601String(),
-      });
-    });
+    // setState(() {
+    //   _messages.add({
+    //     'id': tempMessageId,
+    //     'content': messageContent,
+    //     'sender_id': _currentUserId,
+    //     'is_me': true,
+    //     'sent_at': DateTime.now().toIso8601String(),
+    //   });
+    // });
     _scrollToBottom();
 
     try {
-      final messageId = await _dbHelper.saveMessage(
-        widget.chatId,
-        _currentUserId!,
-        messageContent,
-      );
-
-      await _dbHelper.updateChatLastMessage(widget.chatId, messageId!);
+      // final messageId = await _dbHelper.saveMessage(
+      //   widget.chatId,
+      //   _currentUserId!,
+      //   messageContent,
+      // );
+      //
+      // await _dbHelper.updateChatLastMessage(widget.chatId, messageId!);
 
       _channel.sink.add(json.encode({
         'type': 'message',
@@ -204,10 +219,10 @@ class _HomePageState extends State<HomePage>
       }));
 
       // Update message with real ID
-      setState(() {
-        final index = _messages.indexWhere((m) => m['id'] == tempMessageId);
-        if (index != -1) _messages[index]['id'] = messageId;
-      });
+      // setState(() {
+      //   final index = _messages.indexWhere((m) => m['id'] == tempMessageId);
+      //   if (index != -1) _messages[index]['id'] = messageId;
+      // });
     } catch (e) {
       // Remove optimistic message on error
       setState(() {

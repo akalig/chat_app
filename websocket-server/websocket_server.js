@@ -12,7 +12,11 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
 });
 
-const wss = new WebSocket.Server({ port: 8080 });
+const wss = new WebSocket.Server({
+    port: 8080,
+    host: '0.0.0.0'
+});
+
 const activeConnections = new Map();
 
 async function checkDatabaseConnection() {
@@ -105,7 +109,7 @@ async function saveMessage(chatId, senderId, content) {
   try {
     const res = await client.query(
       `INSERT INTO messages (chat_id, sender_id, content, sent_at, status)
-       VALUES ($1, $2, $3, NOW(), 'delivered')
+       VALUES ($1, $2, $3, NOW(), 'sent')
        RETURNING id`,
       [chatId, senderId, content]
     );
