@@ -32,17 +32,17 @@ class _HomePageState extends State<HomePage>
   final ScrollController _scrollController = ScrollController();
   final DatabaseHelper _dbHelper = DatabaseHelper();
 
+  final Map<String, Map<String, dynamic>> _typingUsers = {};
+  Timer? _typingTimer;
+  Timer? _typingDebounce;
+
   @override
   void initState() {
     super.initState();
-    try {
-      _initializeChat();
-    } catch (e, stack) {
-      print('Error during initState: $e');
-      print(stack);
-    }
+    _initializeChat();
   }
 
+  /// Show chats when opened the page
   Future<void> _initializeChat() async {
     print('Initializing chat...');
     await _loadUserData();
@@ -68,17 +68,11 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  // Handles chat formats
   Map<String, dynamic> _formatMessage(Map<String, dynamic> msg) {
-    DateTime sentAt;
-
-    // Handle both String and DateTime inputs
-    if (msg['sent_at'] is String) {
-      sentAt = DateTime.parse(msg['sent_at']);
-    } else if (msg['sent_at'] is DateTime) {
-      sentAt = msg['sent_at'] as DateTime;
-    } else {
-      sentAt = DateTime.now(); // fallback
-    }
+    DateTime sentAt = msg['sent_at'] is String
+        ? DateTime.parse(msg['sent_at'])
+        : msg['sent_at'] ?? DateTime.now();
 
     return {
       'id': msg['id'],
@@ -86,8 +80,9 @@ class _HomePageState extends State<HomePage>
       'sender_id': msg['sender_id'],
       'firstname': msg['firstname'],
       'lastname': msg['lastname'],
-      'sent_at': sentAt.toIso8601String(), // Ensure we always store as ISO string
+      'sent_at': sentAt.toIso8601String(),
       'is_me': msg['sender_id'] == _currentUserId,
+      'status': msg['status'] ?? 'sent', // Add default status
     };
   }
 
@@ -101,14 +96,15 @@ class _HomePageState extends State<HomePage>
         'sender_id': message['sender_id'],
         'firstname': message['firstname'],
         'lastname': message['lastname'],
-        // Ensure 'sent_at' is a string (adjust if server sends DateTime)
         'sent_at': message['sent_at'].toString(),
         'is_me': message['sender_id'] == _currentUserId,
+        'status': message['status'] ?? 'sent', // Add status
       });
     });
     _scrollToBottom();
   }
 
+  // Get User's data
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     _currentUserId = prefs.getString('userId');
@@ -116,20 +112,10 @@ class _HomePageState extends State<HomePage>
     print('Loaded user data: userId=$_currentUserId, username=$_username');
   }
 
+  // Initialization of Web Socket Connection
   void _connectToWebSocket() {
     try {
-      // print('Connecting to WebSocket at ws://192.168.1.34:8080');
-      // _channel = WebSocketChannel.connect(
-      //   Uri.parse('ws://192.168.1.34:8080'),
-      // );
-
-      print('Connecting to WebSocket at ws://10.0.2.2:8080');
-      _channel = WebSocketChannel.connect(
-        Uri.parse('ws://10.0.2.2:8080'),
-      );
-
-      print('WebSocket connection established');
-
+      _channel = WebSocketChannel.connect(Uri.parse('ws://10.0.2.2:8080'));
       _channel.sink.add(json.encode({
         'type': 'auth',
         'userId': _currentUserId,
@@ -137,31 +123,46 @@ class _HomePageState extends State<HomePage>
       }));
 
       _channel.stream.listen(
-            (message) {
-          print('Received WebSocket message: $message');
-          final decoded = json.decode(message);
-          if (decoded['type'] == 'message') {
-            _handleIncomingMessage(decoded);
-          } else if (decoded['type'] == 'history') {
-            _handleHistory(decoded['messages']);
-          }
-        },
-        onError: (error) {
-          print('WebSocket stream error: $error');
-          _handleWebSocketError(error);
-        },
-        onDone: () {
-          print('WebSocket stream done');
-          _handleWebSocketDisconnect();
-        },
+            (message) => _handleWebSocketMessage(message),
+        onError: _handleWebSocketError,
+        onDone: _handleWebSocketDisconnect,
       );
     } catch (e) {
-      print('WebSocket connection error: $e');
       _showConnectionError();
       _reconnectWebSocket();
     }
   }
 
+  // Handles websocket messages type
+  void _handleWebSocketMessage(dynamic message) {
+    final decoded = json.decode(message);
+    switch (decoded['type']) {
+      case 'message':
+        _handleIncomingMessage(decoded);
+        break;
+      case 'history':
+        _handleHistory(decoded['messages']);
+        break;
+      case 'typing':
+        _handleTypingIndicator(decoded);
+        break;
+      case 'status_update':
+        _handleStatusUpdate(decoded);
+        break;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (ModalRoute
+        .of(context)
+        ?.isCurrent ?? false) {
+      _markMessagesAsRead();
+    }
+  }
+
+  // Handles the list of conversations
   void _handleHistory(List<dynamic> messages) {
     if (!mounted) return;
 
@@ -180,6 +181,7 @@ class _HomePageState extends State<HomePage>
     _scrollToBottom();
   }
 
+  // Handles sending messages
   void _sendMessage() async {
     if (_messageController.text.isEmpty) return;
 
@@ -236,6 +238,7 @@ class _HomePageState extends State<HomePage>
     _messageController.clear();
   }
 
+  // UI interaction for button for scrolling back to bottom
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -248,6 +251,7 @@ class _HomePageState extends State<HomePage>
     });
   }
 
+  /// Handles Websocket statuses
   void _handleWebSocketError(dynamic error) {
     print('WebSocket error: $error');
     if (mounted) {
@@ -294,8 +298,147 @@ class _HomePageState extends State<HomePage>
     });
   }
 
+  /// Handles real-time typing indicator
+  void _handleTyping(bool isTyping) {
+    _typingDebounce?.cancel();
+
+    if (isTyping && _typingTimer == null) {
+      _sendTypingEvent(true);
+      _typingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        _sendTypingEvent(true);
+      });
+    } else {
+      _typingDebounce = Timer(const Duration(seconds: 2), () {
+        _sendTypingEvent(false);
+        _typingTimer?.cancel();
+        _typingTimer = null;
+      });
+    }
+  }
+
+  void _sendTypingEvent(bool isTyping) {
+    _channel.sink.add(json.encode({
+      'type': 'typing',
+      'chat_id': widget.chatId,
+      'sender_id': _currentUserId,
+      'is_typing': isTyping
+    }));
+  }
+
+  void _handleTypingIndicator(Map<String, dynamic> data) {
+    if (!mounted) return;
+
+    final senderId = data['sender_id']?.toString() ?? 'unknown';
+    final firstName = data['firstname']?.toString() ?? 'Someone';
+
+    setState(() {
+      if (data['is_typing'] as bool) {
+        _typingUsers[senderId] = {
+          'name': firstName,
+          'timestamp': DateTime.now(),
+        };
+      } else {
+        _typingUsers.remove(senderId);
+      }
+    });
+  }
+
+  Widget _buildTypingIndicator() {
+    final activeTypers = _typingUsers.entries.where((entry) =>
+    DateTime.now().difference(entry.value['timestamp']) <
+        const Duration(seconds: 3)
+    ).toList();
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 200),
+      child: activeTypers.isNotEmpty
+          ? Container(
+        key: ValueKey(activeTypers.hashCode),
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        child: Row(
+          children: [
+            ...activeTypers.take(3).map((entry) => Padding(
+              padding: const EdgeInsets.only(right: 4.0),
+              child: Text(
+                '${entry.value['name']} is typing',
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            )),
+            _buildTypingAnimation(),
+          ],
+        ),
+      )
+          : const SizedBox.shrink(),
+    );
+  }
+
+  Widget _buildTypingAnimation() => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: List.generate(3, (i) => _TypingDot(delay: i * 200)),
+  );
+
+  /// Handles Message Status Indicator
+  void _handleStatusUpdate(Map<String, dynamic> update) {
+    if (!mounted) return;
+
+    setState(() {
+      for (final message in _messages) {
+        if (update['message_ids'].contains(message['id'])) {
+          message['status'] = update['status'];
+        }
+      }
+    });
+
+    // Update local database if needed
+    _dbHelper.updateMessageStatuses(
+        update['message_ids'],
+        update['status']
+    );
+  }
+
+  void _markMessagesAsRead() {
+    final unreadMessages = _messages.where((msg) =>
+    !msg['is_me'] && msg['status'] != 'read'
+    ).map((msg) => msg['id']).toList();
+
+    if (unreadMessages.isNotEmpty) {
+      _channel.sink.add(json.encode({
+        'type': 'mark_as_read',
+        'chat_id': widget.chatId,
+        'message_ids': unreadMessages
+      }));
+    }
+  }
+
+  Widget _buildStatusIndicator(String status) {
+    final effectiveStatus = status.isNotEmpty ? status : 'sent';
+    return Icon(
+      effectiveStatus == 'read'
+          ? Icons.done_all
+          : Icons.done,
+      size: 12,
+      color: _getStatusColor(effectiveStatus),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'read':
+        return Colors.blue;
+      case 'delivered':
+        return Colors.grey[600]!;
+      default: // sent
+        return Colors.grey[400]!;
+    }
+  }
+
   @override
   void dispose() {
+    _typingTimer?.cancel();
+    _typingDebounce?.cancel();
     _channel.sink.close();
     _messageController.dispose();
     _scrollController.dispose();
@@ -325,14 +468,14 @@ class _HomePageState extends State<HomePage>
                 final message = _messages[index];
                 final isMe = message['is_me'] ?? false;
 
+                // In ListView.builder itemBuilder
                 return Align(
-                  alignment: isMe ? Alignment.centerRight : Alignment
-                      .centerLeft,
+                  alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
-                    margin: const EdgeInsets.symmetric(
-                      vertical: 4,
-                      horizontal: 8,
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.8,
                     ),
+                    margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: isMe ? Colors.blue[200] : Colors.grey[300],
@@ -351,14 +494,22 @@ class _HomePageState extends State<HomePage>
                           ),
                         Text(message['content']),
                         const SizedBox(height: 4),
-                        Text(
-                          _formatTime(message['timestamp'] ??
-                              message['sent_at']),
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Colors.black54,
-                          ),
-                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _formatTime(message['timestamp'] ?? message['sent_at']),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.black54,
+                              ),
+                            ),
+                            if (isMe) ...[
+                              const SizedBox(width: 6),
+                              _buildStatusIndicator(message['status'] as String),
+                            ],
+                          ],
+                        )
                       ],
                     ),
                   ),
@@ -366,6 +517,7 @@ class _HomePageState extends State<HomePage>
               },
             ),
           ),
+          _buildTypingIndicator(),
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -373,6 +525,9 @@ class _HomePageState extends State<HomePage>
                 Expanded(
                   child: TextField(
                     controller: _messageController,
+                    onChanged: (text) {
+                      _handleTyping(text.isNotEmpty);
+                    },
                     decoration: InputDecoration(
                       hintText: 'Type a message...',
                       border: OutlineInputBorder(
@@ -412,5 +567,51 @@ class _HomePageState extends State<HomePage>
 
   void _logoutDialog(BuildContext context) {
     // Your existing logout implementation
+  }
+}
+
+/// Typing indication UI
+class _TypingDot extends StatefulWidget {
+  final int delay;
+
+  const _TypingDot({required this.delay});
+
+  @override
+  _TypingDotState createState() => _TypingDotState();
+}
+
+class _TypingDotState extends State<_TypingDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _controller,
+      child: Container(
+        width: 8,
+        height: 8,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        decoration: BoxDecoration(
+          color: Colors.grey[600],
+          shape: BoxShape.circle,
+        ),
+      ),
+    );
   }
 }

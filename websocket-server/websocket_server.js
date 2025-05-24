@@ -5,7 +5,7 @@ const pool = new Pool({
   user: 'postgres',
   host: 'localhost',
   database: 'chat_application',
-  password: 'postgres',
+  password: 'admin',
   port: 5432,
   // Add connection timeout
   connectionTimeoutMillis: 5000,
@@ -56,14 +56,19 @@ wss.on('connection', (ws) => {
       }
 
       // Handle messages
-      if (data.type === 'message' && data.sender_id && data.content && data.chat_id) {
+      if (data.type === 'message') {
         try {
           const messageId = await saveMessage(data.chat_id, data.sender_id, data.content);
           const sender = await getSenderDetails(data.sender_id);
           const participants = await getChatParticipants(data.chat_id);
 
-          participants.forEach(participantId => {
+          participants.forEach(async participantId => {
             const connection = activeConnections.get(participantId);
+            const status = connection ? 'delivered' : 'sent';
+
+            // Update status for each recipient
+            await updateMessageStatus(messageId, status, participantId);
+
             if (connection && connection.readyState === WebSocket.OPEN) {
               connection.send(JSON.stringify({
                 type: 'message',
@@ -72,18 +77,68 @@ wss.on('connection', (ws) => {
                 sender_id: data.sender_id,
                 firstname: sender.firstname,
                 lastname: sender.lastname,
-                sent_at: new Date().toISOString()
+                sent_at: new Date().toISOString(),
+                status: status // Send initial status
               }));
             }
           });
         } catch (err) {
-          console.error('Error handling message:', err);
-          ws.send(JSON.stringify({
-            type: 'error',
-            message: 'Failed to send message'
-          }));
+          // Error handling
         }
       }
+
+      if (data.type === 'typing') {
+          try {
+            const participants = await getChatParticipants(data.chat_id);
+            const sender = await getSenderDetails(data.sender_id);
+
+            participants.forEach(participantId => {
+              if (participantId !== data.sender_id) {
+                const connection = activeConnections.get(participantId);
+                if (connection?.readyState === WebSocket.OPEN) {
+                  connection.send(JSON.stringify({
+                    type: 'typing',
+                    chat_id: data.chat_id,
+                    sender_id: data.sender_id,
+                    firstname: sender.firstname,
+                    is_typing: data.is_typing
+                  }));
+                }
+              }
+            });
+          } catch (err) {
+            console.error('Typing handler error:', err);
+          }
+        }
+
+        if (data.type === 'mark_as_read') {
+          try {
+            await client.query(
+              `UPDATE messages SET status = 'read'
+               WHERE chat_id = $1
+               AND sender_id != $2
+               AND status != 'read'`,
+              [data.chat_id, data.user_id]
+            );
+
+            // Broadcast read status update
+            const participants = await getChatParticipants(data.chat_id);
+            participants.forEach(participantId => {
+              const connection = activeConnections.get(participantId);
+              if (connection) {
+                connection.send(JSON.stringify({
+                  type: 'status_update',
+                  chat_id: data.chat_id,
+                  message_ids: data.message_ids,
+                  status: 'read'
+                }));
+              }
+            });
+          } catch (err) {
+            console.error('Read receipt error:', err);
+          }
+        }
+
     } catch (error) {
       console.error('Message handling error:', error);
     }
@@ -118,6 +173,21 @@ async function saveMessage(chatId, senderId, content) {
     client.release();
   }
 }
+
+const updateMessageStatus = async (messageId, status, recipientId) => {
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `UPDATE messages SET status = $1
+       WHERE id = $2 AND chat_id IN (
+         SELECT chat_id FROM chat_users WHERE user_id = $3
+       )`,
+      [status, messageId, recipientId]
+    );
+  } finally {
+    client.release();
+  }
+};
 
 async function getSenderDetails(userId) {
   const client = await pool.connect();

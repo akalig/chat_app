@@ -336,6 +336,34 @@ class DatabaseHelper {
     }
   }
 
+  // In DatabaseHelper class
+  Future<void> updateMessageStatuses(List<String> messageIds, String status) async {
+    try {
+      await connect();
+
+      if (messageIds.isEmpty) return;
+
+      // Generate numbered placeholders for IN clause
+      final params = List.generate(messageIds.length, (i) => '@id${i + 1}');
+      final paramsMap = {for (var i = 0; i < messageIds.length; i++) 'id${i + 1}': messageIds[i]};
+
+      await _connection!.query('''
+      UPDATE messages 
+      SET status = @status
+      WHERE id IN (${params.join(', ')})
+    ''', substitutionValues: {
+        'status': status,
+        ...paramsMap
+      });
+
+    } catch (e) {
+      print('Error updating message statuses: $e');
+      throw Exception('Failed to update message statuses');
+    } finally {
+      await close();
+    }
+  }
+
   Future<void> close() async {
     try {
       await _connection!.close();
