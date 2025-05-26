@@ -93,7 +93,6 @@ class _LoginState extends State<Login> {
     final password = passwordController.text;
     final db = DatabaseHelper();
 
-    await db.connect();
     // In your _login method:
     final user = await db.authenticateUser(username, password);
 
