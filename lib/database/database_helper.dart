@@ -174,22 +174,6 @@ class DatabaseHelper {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getChatParticipants(String chatId) async {
-    try {
-      await connect();
-      final result = await _connection!.query('''
-      SELECT user_id FROM chat_users WHERE chat_id = @chatId
-    ''', substitutionValues: {'chatId': chatId});
-
-      return result.map((row) => row.toColumnMap()).toList();
-    } catch (e) {
-      print('Error getting participants: $e');
-      return [];
-    } finally {
-      await close();
-    }
-  }
-
   Future<String?> createChat(List<String> participantIds, String chatName) async {
     try {
       await connect();
@@ -258,45 +242,6 @@ class DatabaseHelper {
     }
   }
 
-  Future<void> updateChatLastMessage(String chatId, String messageId) async {
-    try {
-      await connect();
-      await _connection!.query(
-        'UPDATE chats SET last_message_id = @messageId WHERE id = @chatId',
-        substitutionValues: {
-          'chatId': chatId,
-          'messageId': messageId,
-        },
-      );
-    } catch (e) {
-      print('Error updating last message: $e');
-    } finally {
-      await close();
-    }
-  }
-
-  Future<String?> saveMessage(String chatId, String senderId, String content) async {
-    try {
-      await connect();
-      final result = await _connection!.query('''
-      INSERT INTO messages (chat_id, sender_id, content, sent_at)
-      VALUES (@chatId, @senderId, @content, NOW())
-      RETURNING id
-    ''', substitutionValues: {
-        'chatId': chatId,
-        'senderId': senderId,
-        'content': content,
-      });
-
-      return result.first[0].toString();
-    } catch (e) {
-      print('Error saving message: $e');
-      return null;
-    } finally {
-      await close();
-    }
-  }
-
   Future<List<Map<String, dynamic>>> getAllUsersExceptCurrent(String currentUserId) async {
     try {
       await connect();
@@ -310,55 +255,6 @@ class DatabaseHelper {
     } catch (e) {
       print('Error getting users: $e');
       return [];
-    } finally {
-      await close();
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getChatMessages(String chatId) async {
-    try {
-      await connect();
-      final result = await _connection!.query('''
-      SELECT m.id, m.content, m.sender_id, m.sent_at,
-             u.firstname, u.lastname
-      FROM messages m
-      JOIN users u ON m.sender_id = u.id
-      WHERE m.chat_id = @chatId
-      ORDER BY m.sent_at ASC
-    ''', substitutionValues: {'chatId': chatId});
-
-      return result.map((row) => row.toColumnMap()).toList();
-    } catch (e) {
-      print('Error getting messages: $e');
-      return [];
-    } finally {
-      await close();
-    }
-  }
-
-  // In DatabaseHelper class
-  Future<void> updateMessageStatuses(List<String> messageIds, String status) async {
-    try {
-      await connect();
-
-      if (messageIds.isEmpty) return;
-
-      // Generate numbered placeholders for IN clause
-      final params = List.generate(messageIds.length, (i) => '@id${i + 1}');
-      final paramsMap = {for (var i = 0; i < messageIds.length; i++) 'id${i + 1}': messageIds[i]};
-
-      await _connection!.query('''
-      UPDATE messages 
-      SET status = @status
-      WHERE id IN (${params.join(', ')})
-    ''', substitutionValues: {
-        'status': status,
-        ...paramsMap
-      });
-
-    } catch (e) {
-      print('Error updating message statuses: $e');
-      throw Exception('Failed to update message statuses');
     } finally {
       await close();
     }

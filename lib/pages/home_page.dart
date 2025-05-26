@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:chat_app/database/database_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -30,7 +29,6 @@ class _HomePageState extends State<HomePage>
   String? _currentUserId;
   String? _username;
   final ScrollController _scrollController = ScrollController();
-  final DatabaseHelper _dbHelper = DatabaseHelper();
 
   final Map<String, Map<String, dynamic>> _typingUsers = {};
   Timer? _typingTimer;
@@ -46,26 +44,7 @@ class _HomePageState extends State<HomePage>
   Future<void> _initializeChat() async {
     print('Initializing chat...');
     await _loadUserData();
-    await _loadInitialMessages();
     _connectToWebSocket();
-  }
-
-  Future<void> _loadInitialMessages() async {
-    try {
-      final messages = await _dbHelper.getChatMessages(widget.chatId);
-      print('Get Messages: $messages');
-
-      if (mounted) {
-        setState(() {
-          _messages.addAll(messages.map((msg) => _formatMessage(msg)));
-        });
-      }
-
-      print('Received Messages: $_messages');
-      _scrollToBottom();
-    } catch (e) {
-      print('Error loading messages: $e');
-    }
   }
 
   // Handles chat formats
@@ -146,7 +125,7 @@ class _HomePageState extends State<HomePage>
       case 'typing':
         _handleTypingIndicator(decoded);
         break;
-      case 'status_update':
+      case 'mark_as_read':
         _handleStatusUpdate(decoded);
         break;
     }
@@ -155,9 +134,9 @@ class _HomePageState extends State<HomePage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (ModalRoute
-        .of(context)
-        ?.isCurrent ?? false) {
+    print('🔍 Checking if route is current...');
+    if (ModalRoute.of(context)?.isCurrent ?? false) {
+      print('🏠 HomePage is currently visible - marking messages as read');
       _markMessagesAsRead();
     }
   }
@@ -175,7 +154,8 @@ class _HomePageState extends State<HomePage>
             'sender_id': msg['sender_id'],
             'firstname': msg['firstname'],
             'lastname': msg['lastname'],
-            'sent_at': msg['sent_at']
+            'sent_at': msg['sent_at'],
+            'status': msg['status']
           })));
     });
     _scrollToBottom();
@@ -191,27 +171,9 @@ class _HomePageState extends State<HomePage>
         .toString();
     final messageContent = _messageController.text;
 
-    // Add message optimistically
-    // setState(() {
-    //   _messages.add({
-    //     'id': tempMessageId,
-    //     'content': messageContent,
-    //     'sender_id': _currentUserId,
-    //     'is_me': true,
-    //     'sent_at': DateTime.now().toIso8601String(),
-    //   });
-    // });
     _scrollToBottom();
 
     try {
-      // final messageId = await _dbHelper.saveMessage(
-      //   widget.chatId,
-      //   _currentUserId!,
-      //   messageContent,
-      // );
-      //
-      // await _dbHelper.updateChatLastMessage(widget.chatId, messageId!);
-
       _channel.sink.add(json.encode({
         'type': 'message',
         'chat_id': widget.chatId,
@@ -220,11 +182,6 @@ class _HomePageState extends State<HomePage>
         'timestamp': DateTime.now().toIso8601String(),
       }));
 
-      // Update message with real ID
-      // setState(() {
-      //   final index = _messages.indexWhere((m) => m['id'] == tempMessageId);
-      //   if (index != -1) _messages[index]['id'] = messageId;
-      // });
     } catch (e) {
       // Remove optimistic message on error
       setState(() {
@@ -384,19 +341,16 @@ class _HomePageState extends State<HomePage>
   void _handleStatusUpdate(Map<String, dynamic> update) {
     if (!mounted) return;
 
+    print('🔄 Processing status update: ${update['message_ids']} => ${update['status']}');
+
     setState(() {
       for (final message in _messages) {
         if (update['message_ids'].contains(message['id'])) {
+          print('✏️ Updating message ${message['id']} status to ${update['status']}');
           message['status'] = update['status'];
         }
       }
     });
-
-    // Update local database if needed
-    _dbHelper.updateMessageStatuses(
-        update['message_ids'],
-        update['status']
-    );
   }
 
   void _markMessagesAsRead() {
@@ -404,12 +358,26 @@ class _HomePageState extends State<HomePage>
     !msg['is_me'] && msg['status'] != 'read'
     ).map((msg) => msg['id']).toList();
 
-    if (unreadMessages.isNotEmpty) {
-      _channel.sink.add(json.encode({
+    print('👉 Preparing to mark messages as read: $unreadMessages');
+
+    if (unreadMessages.isNotEmpty && _currentUserId != null) {
+      final message = json.encode({
         'type': 'mark_as_read',
         'chat_id': widget.chatId,
-        'message_ids': unreadMessages
-      }));
+        'message_ids': unreadMessages,
+        'user_id': _currentUserId
+      });
+
+      print('🚀 Sending mark_as_read message: $message');
+
+      try {
+        _channel.sink.add(message);
+        print('✅ mark_as_read message sent successfully');
+      } catch (e) {
+        print('❌ Error sending mark_as_read: $e');
+      }
+    } else {
+      print('⚠️ No unread messages or missing user ID');
     }
   }
 
@@ -467,6 +435,8 @@ class _HomePageState extends State<HomePage>
               itemBuilder: (context, index) {
                 final message = _messages[index];
                 final isMe = message['is_me'] ?? false;
+
+                print('Status::: ${message['status'] }');
 
                 // In ListView.builder itemBuilder
                 return Align(

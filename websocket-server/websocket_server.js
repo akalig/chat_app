@@ -5,9 +5,8 @@ const pool = new Pool({
   user: 'postgres',
   host: 'localhost',
   database: 'chat_application',
-  password: 'admin',
+  password: 'postgres',
   port: 5432,
-  // Add connection timeout
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
 });
@@ -33,8 +32,10 @@ wss.on('connection', (ws) => {
   console.log('New client connected');
 
   ws.on('message', async (message) => {
+  console.log('📩 RAW MESSAGE:', message.toString());
     try {
       const data = JSON.parse(message);
+      console.log('📦 PARSED MESSAGE:', JSON.stringify(data, null, 2));
 
       // Handle authentication
       if (data.type === 'auth' && data.userId) {
@@ -55,7 +56,6 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      // Handle messages
       if (data.type === 'message') {
         try {
           const messageId = await saveMessage(data.chat_id, data.sender_id, data.content);
@@ -64,10 +64,10 @@ wss.on('connection', (ws) => {
 
           participants.forEach(async participantId => {
             const connection = activeConnections.get(participantId);
-            const status = connection ? 'delivered' : 'sent';
+            const status = connection ? 'read' : 'delivered';
 
             // Update status for each recipient
-            await updateMessageStatus(messageId, status, participantId);
+            await updateMessageStatus(status, participantId);
 
             if (connection && connection.readyState === WebSocket.OPEN) {
               connection.send(JSON.stringify({
@@ -81,6 +81,7 @@ wss.on('connection', (ws) => {
                 status: status // Send initial status
               }));
             }
+
           });
         } catch (err) {
           // Error handling
@@ -111,33 +112,76 @@ wss.on('connection', (ws) => {
           }
         }
 
-        if (data.type === 'mark_as_read') {
-          try {
-            await client.query(
-              `UPDATE messages SET status = 'read'
-               WHERE chat_id = $1
-               AND sender_id != $2
-               AND status != 'read'`,
-              [data.chat_id, data.user_id]
-            );
+      if (data.type === 'mark_as_read') {
+        console.log('MARK_AS_READ:', {
+          chatId: data.chat_id,
+          userId: data.user_id,
+          messageIds: data.message_ids
+        });
 
-            // Broadcast read status update
-            const participants = await getChatParticipants(data.chat_id);
-            participants.forEach(participantId => {
-              const connection = activeConnections.get(participantId);
-              if (connection) {
-                connection.send(JSON.stringify({
-                  type: 'status_update',
-                  chat_id: data.chat_id,
-                  message_ids: data.message_ids,
-                  status: 'read'
-                }));
-              }
-            });
-          } catch (err) {
-            console.error('Read receipt error:', err);
+        const client = await pool.connect();
+        try {
+          // First verify which messages actually belong to this chat and user
+          const verifyQuery = await client.query(
+            `SELECT m.id
+             FROM messages m
+             JOIN chat_users cu ON m.chat_id = cu.chat_id
+             WHERE m.id = ANY($1::uuid[])
+               AND m.chat_id = $2
+               AND cu.user_id = $3
+               AND m.sender_id != $3
+               AND m.status != 'read'`,
+            [data.message_ids, data.chat_id, data.user_id]
+          );
+
+          const validMessageIds = verifyQuery.rows.map(row => row.id);
+          console.log(`Valid messages to update: ${validMessageIds}`);
+
+          if (validMessageIds.length === 0) {
+            console.log('No valid messages to update');
+            return;
           }
+
+          // Update only valid messages
+          const updateResult = await client.query(
+            `UPDATE messages
+             SET status = 'read'
+             WHERE id = ANY($1::uuid[])
+             RETURNING id`,
+            [validMessageIds]
+          );
+
+          console.log(`Updated ${updateResult.rowCount} messages to 'read' status`);
+
+          // Get all chat participants
+          const participants = await getChatParticipants(data.chat_id);
+
+          // Prepare status update with only valid message IDs
+          const statusUpdate = {
+            type: 'status_update',
+            chat_id: data.chat_id,
+            message_ids: validMessageIds,
+            status: 'read',
+            updated_by: data.user_id,
+            timestamp: new Date().toISOString()
+          };
+
+          // Broadcast to all participants
+          participants.forEach(participantId => {
+            const conn = activeConnections.get(participantId);
+            if (conn && conn.readyState === WebSocket.OPEN) {
+              console.log(`Sending status update to ${participantId}`);
+              conn.send(JSON.stringify(statusUpdate));
+            }
+          });
+
+        } catch (err) {
+          console.error('Error processing mark_as_read:', err);
+        } finally {
+          client.release();
         }
+        return;
+      }
 
     } catch (error) {
       console.error('Message handling error:', error);
@@ -174,15 +218,15 @@ async function saveMessage(chatId, senderId, content) {
   }
 }
 
-const updateMessageStatus = async (messageId, status, recipientId) => {
+const updateMessageStatus = async (status, recipientId) => {
   const client = await pool.connect();
   try {
     await client.query(
       `UPDATE messages SET status = $1
-       WHERE id = $2 AND chat_id IN (
-         SELECT chat_id FROM chat_users WHERE user_id = $3
+       WHERE chat_id IN (
+         SELECT chat_id FROM chat_users WHERE user_id = $2
        )`,
-      [status, messageId, recipientId]
+      [status, recipientId]
     );
   } finally {
     client.release();
