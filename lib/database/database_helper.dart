@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 class DatabaseHelper {
-  static const String _baseUrl = 'http://10.0.2.2/chat_app/api';
+  static const String _baseUrl = 'http://10.0.2.2/chat_app_restful_api/';
 
   // Authenticate User Account
   Future<Map<String, dynamic>?> authenticateUser(String username, String password) async {
