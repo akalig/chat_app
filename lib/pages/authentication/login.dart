@@ -2,7 +2,7 @@ import 'dart:typed_data';
 import 'package:chat_app/database/database_helper.dart';
 import 'package:blurrycontainer/blurrycontainer.dart';
 import 'package:chat_app/pages/authentication/register.dart';
-import 'package:chat_app/pages/home_page.dart';
+import 'package:chat_app/pages/chat/chat_room.dart';
 import 'package:chat_app/pages/chat/chats_page.dart';
 import 'package:elegant_notification/elegant_notification.dart';
 import 'package:elegant_notification/resources/arrays.dart';

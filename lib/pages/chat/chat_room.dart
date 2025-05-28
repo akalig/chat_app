@@ -4,21 +4,21 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-class HomePage extends StatefulWidget {
+class ChatRoom extends StatefulWidget {
   final String chatId;
   final String chatName;
 
-  const HomePage({
+  const ChatRoom({
     super.key,
     required this.chatId,
     required this.chatName,
   });
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<ChatRoom> createState() => _ChatRoomState();
 }
 
-class _HomePageState extends State<HomePage>
+class _ChatRoomState extends State<ChatRoom>
     with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
@@ -125,19 +125,6 @@ class _HomePageState extends State<HomePage>
       case 'typing':
         _handleTypingIndicator(decoded);
         break;
-      case 'mark_as_read':
-        _handleStatusUpdate(decoded);
-        break;
-    }
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    print('🔍 Checking if route is current...');
-    if (ModalRoute.of(context)?.isCurrent ?? false) {
-      print('🏠 HomePage is currently visible - marking messages as read');
-      _markMessagesAsRead();
     }
   }
 
@@ -276,7 +263,7 @@ class _HomePageState extends State<HomePage>
   void _sendTypingEvent(bool isTyping) {
     _channel.sink.add(json.encode({
       'type': 'typing',
-      'chat_id': widget.chatId,
+      'chat_id': widget.chatId,  // Make sure this is included
       'sender_id': _currentUserId,
       'is_typing': isTyping
     }));
@@ -284,6 +271,9 @@ class _HomePageState extends State<HomePage>
 
   void _handleTypingIndicator(Map<String, dynamic> data) {
     if (!mounted) return;
+
+    // Only process typing indicators for the current chat
+    if (data['chat_id'] != widget.chatId) return;
 
     final senderId = data['sender_id']?.toString() ?? 'unknown';
     final firstName = data['firstname']?.toString() ?? 'Someone';
@@ -338,49 +328,6 @@ class _HomePageState extends State<HomePage>
   );
 
   /// Handles Message Status Indicator
-  void _handleStatusUpdate(Map<String, dynamic> update) {
-    if (!mounted) return;
-
-    print('🔄 Processing status update: ${update['message_ids']} => ${update['status']}');
-
-    setState(() {
-      for (final message in _messages) {
-        if (update['message_ids'].contains(message['id'])) {
-          print('✏️ Updating message ${message['id']} status to ${update['status']}');
-          message['status'] = update['status'];
-        }
-      }
-    });
-  }
-
-  void _markMessagesAsRead() {
-    final unreadMessages = _messages.where((msg) =>
-    !msg['is_me'] && msg['status'] != 'read'
-    ).map((msg) => msg['id']).toList();
-
-    print('👉 Preparing to mark messages as read: $unreadMessages');
-
-    if (unreadMessages.isNotEmpty && _currentUserId != null) {
-      final message = json.encode({
-        'type': 'mark_as_read',
-        'chat_id': widget.chatId,
-        'message_ids': unreadMessages,
-        'user_id': _currentUserId
-      });
-
-      print('🚀 Sending mark_as_read message: $message');
-
-      try {
-        _channel.sink.add(message);
-        print('✅ mark_as_read message sent successfully');
-      } catch (e) {
-        print('❌ Error sending mark_as_read: $e');
-      }
-    } else {
-      print('⚠️ No unread messages or missing user ID');
-    }
-  }
-
   Widget _buildStatusIndicator(String status) {
     final effectiveStatus = status.isNotEmpty ? status : 'sent';
     return Icon(
@@ -421,8 +368,13 @@ class _HomePageState extends State<HomePage>
         title: Text(widget.chatName),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => _logoutDialog(context),
+            icon: const Icon(Icons.call),
+            onPressed: () {},
+          ),
+
+          IconButton(
+            icon: const Icon(Icons.video_call),
+            onPressed: () {},
           ),
         ],
       ),

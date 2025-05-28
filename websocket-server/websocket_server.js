@@ -89,98 +89,29 @@ wss.on('connection', (ws) => {
       }
 
       if (data.type === 'typing') {
-          try {
-            const participants = await getChatParticipants(data.chat_id);
-            const sender = await getSenderDetails(data.sender_id);
-
-            participants.forEach(participantId => {
-              if (participantId !== data.sender_id) {
-                const connection = activeConnections.get(participantId);
-                if (connection?.readyState === WebSocket.OPEN) {
-                  connection.send(JSON.stringify({
-                    type: 'typing',
-                    chat_id: data.chat_id,
-                    sender_id: data.sender_id,
-                    firstname: sender.firstname,
-                    is_typing: data.is_typing
-                  }));
-                }
-              }
-            });
-          } catch (err) {
-            console.error('Typing handler error:', err);
-          }
-        }
-
-      if (data.type === 'mark_as_read') {
-        console.log('MARK_AS_READ:', {
-          chatId: data.chat_id,
-          userId: data.user_id,
-          messageIds: data.message_ids
-        });
-
-        const client = await pool.connect();
         try {
-          // First verify which messages actually belong to this chat and user
-          const verifyQuery = await client.query(
-            `SELECT m.id
-             FROM messages m
-             JOIN chat_users cu ON m.chat_id = cu.chat_id
-             WHERE m.id = ANY($1::uuid[])
-               AND m.chat_id = $2
-               AND cu.user_id = $3
-               AND m.sender_id != $3
-               AND m.status != 'read'`,
-            [data.message_ids, data.chat_id, data.user_id]
-          );
+          const sender = await getSenderDetails(data.sender_id);
 
-          const validMessageIds = verifyQuery.rows.map(row => row.id);
-          console.log(`Valid messages to update: ${validMessageIds}`);
-
-          if (validMessageIds.length === 0) {
-            console.log('No valid messages to update');
-            return;
-          }
-
-          // Update only valid messages
-          const updateResult = await client.query(
-            `UPDATE messages
-             SET status = 'read'
-             WHERE id = ANY($1::uuid[])
-             RETURNING id`,
-            [validMessageIds]
-          );
-
-          console.log(`Updated ${updateResult.rowCount} messages to 'read' status`);
-
-          // Get all chat participants
+          // Only send to participants of the specific chat
           const participants = await getChatParticipants(data.chat_id);
 
-          // Prepare status update with only valid message IDs
-          const statusUpdate = {
-            type: 'status_update',
-            chat_id: data.chat_id,
-            message_ids: validMessageIds,
-            status: 'read',
-            updated_by: data.user_id,
-            timestamp: new Date().toISOString()
-          };
-
-          // Broadcast to all participants
           participants.forEach(participantId => {
-            const conn = activeConnections.get(participantId);
-            if (conn && conn.readyState === WebSocket.OPEN) {
-              console.log(`Sending status update to ${participantId}`);
-              conn.send(JSON.stringify(statusUpdate));
+            if (participantId !== data.sender_id) {
+              const connection = activeConnections.get(participantId);
+              if (connection?.readyState === WebSocket.OPEN) {
+                connection.send(JSON.stringify({
+                  type: 'typing',
+                  chat_id: data.chat_id,  // Include chat_id in the message
+                  sender_id: data.sender_id,
+                  firstname: sender.firstname,
+                  is_typing: data.is_typing
+                }));
+              }
             }
           });
-
         } catch (err) {
-          console.error('Error processing mark_as_read:', err);
-        } finally {
-          client.release();
+          console.error('Typing handler error:', err);
         }
-        return;
       }
 
     } catch (error) {

@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:chat_app/pages/authentication/login.dart';
 import 'package:chat_app/pages/chat/chats_page.dart';
-import 'package:chat_app/pages/home_page.dart';
+import 'package:chat_app/pages/chat/chat_room.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
