@@ -1,8 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:image/image.dart' as img;
 
 class ChatRoom extends StatefulWidget {
   final String chatId;
@@ -33,6 +38,10 @@ class _ChatRoomState extends State<ChatRoom>
   final Map<String, Map<String, dynamic>> _typingUsers = {};
   Timer? _typingTimer;
   Timer? _typingDebounce;
+
+  bool showFilesOption = false;
+  late List<Uint8List> attachmentImagesList = [];
+  final ImagePicker _imagePicker = ImagePicker();
 
   @override
   void initState() {
@@ -350,6 +359,102 @@ class _ChatRoomState extends State<ChatRoom>
     }
   }
 
+  // Handle hide and show file options
+  void hideShowFileOptions () {
+    setState(() {
+      if (!showFilesOption) {
+        showFilesOption = true;
+      } else {
+        showFilesOption = false;
+      }
+    });
+  }
+
+  Future<void> openGallery() async {
+    final XFile? pickedFile = (await _imagePicker.pickMultiImage()) as XFile?;
+
+    if (pickedFile != null) {
+      final File imageFile = File(pickedFile.path);
+
+      // Log original image size
+      print("Original image size: ${imageFile.lengthSync()} bytes");
+
+      // Compress the image
+      Uint8List compressedImage = await compressImage(imageFile, quality: 70);
+
+      // Log compressed image size
+      print("Compressed image size: ${compressedImage.length} bytes");
+
+      // Update the state with the picked image
+      setState(() {
+        attachmentImagesList.add(compressedImage);
+        print('Attachemnts: $attachmentImagesList');
+      });
+
+    }
+  }
+
+  Future<void> openCamera() async {
+    final XFile? pickedFile = await _imagePicker.pickImage(source: ImageSource.camera);
+
+    if (pickedFile != null) {
+      final File imageFile = File(pickedFile.path);
+
+      // Log original image size
+      print("Original image size: ${imageFile.lengthSync()} bytes");
+
+      // Compress the image
+      Uint8List compressedImage = await compressImage(await removeRotation(imageFile), quality: 70);
+
+      // Log compressed image size
+      print("Compressed image size: ${compressedImage.length} bytes");
+
+      // Update the state with the picked image
+      setState(() {
+        attachmentImagesList.add(compressedImage);
+        print('Attachemnts: $attachmentImagesList');
+      });
+
+    }
+  }
+
+  Future<void> openStorage() async {
+    final XFile? pickedFile = (await _imagePicker.pickMultipleMedia()) as XFile?;
+
+    if (pickedFile != null) {
+      final File imageFile = File(pickedFile.path);
+
+      // Log original image size
+      print("Original image size: ${imageFile.lengthSync()} bytes");
+
+      // Compress the image
+      Uint8List compressedImage = await compressImage(await removeRotation(imageFile), quality: 70);
+
+      // Log compressed image size
+      print("Compressed image size: ${compressedImage.length} bytes");
+
+      // Update the state with the picked image
+      setState(() {
+        attachmentImagesList.add(compressedImage);
+        print('Attachemnts: $attachmentImagesList');
+      });
+
+    }
+  }
+
+  /// Fix image orientation (useful for camera)
+  Future<File> removeRotation(File inputImage) async {
+    final img.Image? capturedImage = img.decodeImage(await inputImage.readAsBytes());
+    final img.Image orientedImage = img.bakeOrientation(capturedImage!);
+    return await inputImage.writeAsBytes(img.encodeJpg(orientedImage));
+  }
+
+  /// Compress image to reduce size
+  Future<Uint8List> compressImage(File inputImage, {int quality = 50}) async {
+    final img.Image? decodedImage = img.decodeImage(await inputImage.readAsBytes());
+    return Uint8List.fromList(img.encodeJpg(decodedImage!, quality: quality));
+  }
+
   @override
   void dispose() {
     _typingTimer?.cancel();
@@ -444,6 +549,10 @@ class _ChatRoomState extends State<ChatRoom>
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
+                IconButton(
+                  icon: (!showFilesOption ? Icon(Icons.add) : Icon(Icons.minimize)),
+                  onPressed: hideShowFileOptions,
+                ),
                 Expanded(
                   child: TextField(
                     controller: _messageController,
@@ -473,6 +582,48 @@ class _ChatRoomState extends State<ChatRoom>
               ],
             ),
           ),
+          Visibility(
+            visible: showFilesOption,
+            child: Container(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      // Gallery button
+                      IconButton(
+                        onPressed: () {
+                          openGallery();
+                        },
+                        icon: Icon(Icons.image),
+                      ),
+
+                      // Camera button
+                      IconButton(
+                        onPressed: () {
+                          openCamera();
+                        },
+                        icon: Icon(Icons.camera_alt),
+                      ),
+
+                      // File button
+                      IconButton(
+                        onPressed: () {
+                          openStorage();
+                          },
+                        icon: Icon(Icons.upload_file),
+                      ),
+
+                      // Voice recorder button
+                      IconButton(onPressed: () {}, icon: Icon(Icons.record_voice_over)),
+                    ],
+                  ),
+                  SizedBox(height: 15),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -488,7 +639,7 @@ class _ChatRoomState extends State<ChatRoom>
   }
 
   void _logoutDialog(BuildContext context) {
-    // Your existing logout implementation
+
   }
 }
 

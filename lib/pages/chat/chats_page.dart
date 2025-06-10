@@ -108,38 +108,41 @@ class _ChatsPageState extends State<ChatsPage> {
     print('CHAT LIST::: ${_chats}');
     return Scaffold(
       appBar: AppBar(title: const Text('Chats')),
-      body: ListView.builder(
-        itemCount: _chats.length,
-        itemBuilder: (context, index) {
-          final chat = _chats[index];
-          return ListTile(
-            title: Text(chat['firstname'] ?? chat['other_user_name'],
-              style: TextStyle(
-                fontWeight: (chat['status_unread'] != 'read' && index == 0)
-                    ? FontWeight.bold
-                    : FontWeight.normal,
-              ),
-            ),
-            subtitle: Text(chat['last_message'] ?? 'No messages yet',
-              style: TextStyle(
-                fontWeight: (chat['status_unread'] != 'read' && index == 0)
-                    ? FontWeight.bold
-                    : FontWeight.normal,
-              ),
-            ),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChatRoom(
-                    chatId: chat['id'],
-                    chatName: chat['firstname'] ?? chat['other_user_name'],
-                  ),
+      body: RefreshIndicator(
+        onRefresh: _initialize,
+        child: ListView.builder(
+          itemCount: _chats.length,
+          itemBuilder: (context, index) {
+            final chat = _chats[index];
+            return ListTile(
+              title: Text(chat['firstname'] ?? chat['other_user_name'],
+                style: TextStyle(
+                  fontWeight: (chat['status_unread'] != 'read' && index == 0)
+                      ? FontWeight.bold
+                      : FontWeight.normal,
                 ),
-              );
-            },
-          );
-        },
+              ),
+              subtitle: Text(chat['last_message'] ?? 'No messages yet',
+                style: TextStyle(
+                  fontWeight: (chat['status_unread'] != 'read' && index == 0)
+                      ? FontWeight.bold
+                      : FontWeight.normal,
+                ),
+              ),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatRoom(
+                      chatId: chat['id'],
+                      chatName: chat['firstname'] ?? chat['other_user_name'],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         child: const Icon(Icons.add),
