@@ -103,7 +103,7 @@ class _ChatRoomState extends State<ChatRoom>
   // Initialization of Web Socket Connection
   void _connectToWebSocket() {
     try {
-      _channel = WebSocketChannel.connect(Uri.parse('ws://10.0.2.2:8080'));
+      _channel = WebSocketChannel.connect(Uri.parse('ws://ws.bael11.shop'));
       _channel.sink.add(json.encode({
         'type': 'auth',
         'userId': _currentUserId,
