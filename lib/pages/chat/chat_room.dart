@@ -208,12 +208,12 @@ class _ChatRoomState extends State<ChatRoom>
   void _handleWebSocketError(dynamic error) {
     print('WebSocket error: $error');
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Connection error. Trying to reconnect...'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      // ScaffoldMessenger.of(context).showSnackBar(
+      //   const SnackBar(
+      //     content: Text('Connection error. Trying to reconnect...'),
+      //     duration: Duration(seconds: 3),
+      //   ),
+      // );
     }
     _reconnectWebSocket();
   }
