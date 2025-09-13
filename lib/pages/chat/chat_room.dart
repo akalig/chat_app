@@ -572,6 +572,7 @@ class _ChatRoomState extends State<ChatRoom>
                     textCapitalization: TextCapitalization.sentences,
                     keyboardType: TextInputType.multiline,
                     maxLines: null,
+
                     onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
