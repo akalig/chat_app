@@ -359,7 +359,7 @@ class _ChatRoomState extends State<ChatRoom>
     }
   }
 
-  // Handle hide and show file options
+  /// Handle hide and show file options
   void hideShowFileOptions () {
     setState(() {
       if (!showFilesOption) {
